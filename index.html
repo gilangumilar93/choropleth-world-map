@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<title>World Choropleth Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+<style>
+  :root {
+    --bg: #f8fafc;
+    --panel: #ffffff;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --muted: #64748b;
+    --accent: #0284c7;
+    --selected: #f59e0b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100dvh;
+    height: 100vh;
+    overflow: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 16px;
+    background: #ffffff;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+  }
+  header h1 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+  .metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .metrics button {
+    background: var(--panel);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-height: 36px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .metrics button:hover { background: #f1f5f9; }
+  .metrics button.active {
+    background: var(--accent);
+    color: #ffffff;
+    border-color: var(--accent);
+    font-weight: 600;
+  }
+  main {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    position: relative;
+  }
+  #map {
+    flex: 1;
+    background: #e2e8f0;
+    min-height: 0;
+  }
+  #sidepanel {
+    width: 340px;
+    background: var(--panel);
+    border-left: 1px solid var(--border);
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    -webkit-overflow-scrolling: touch;
+  }
+  #sidepanel h2 {
+    margin: 0 0 4px;
+    font-size: 1.35rem;
+  }
+  #sidepanel .iso {
+    color: var(--muted);
+    font-size: 0.875rem;
+    margin-bottom: 12px;
+  }
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 0.95rem;
+  }
+  .metric-row .label { color: var(--muted); }
+  .metric-row .value { font-weight: 600; }
+  .metric-row.current .value { color: var(--accent); }
+  #legend {
+    position: absolute;
+    bottom: 16px;
+    left: 16px;
+    background: rgba(255, 255, 255, 0.95);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    z-index: 1000;
+    font-size: 0.75rem;
+    min-width: 140px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    max-width: calc(100% - 32px);
+  }
+  #legend h3 {
+    margin: 0 0 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .legend-bar {
+    height: 12px;
+    border-radius: 4px;
+    margin-bottom: 6px;
+  }
+  .legend-labels {
+    display: flex;
+    justify-content: space-between;
+    color: var(--muted);
+    font-size: 0.75rem;
+  }
+  .leaflet-tooltip {
+    background: #ffffff;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 0.85rem;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  }
+  .leaflet-tooltip-top:before { border-top-color: #cbd5e1; }
+  .country-selected {
+    stroke: var(--selected) !important;
+    stroke-width: 2.5px !important;
+    fill-opacity: 0.95 !important;
+  }
+  .loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #f8fafc;
+    z-index: 2000;
+    font-size: 1.1rem;
+  }
+  /* Mobile / iPhone Safari */
+  @media (max-width: 480px) {
+    header {
+      padding: 8px 12px;
+    }
+    header h1 {
+      font-size: 1rem;
+      width: 100%;
+    }
+    .metrics {
+      width: 100%;
+      justify-content: space-between;
+    }
+    .metrics button {
+      flex: 1;
+      padding: 8px 6px;
+      font-size: 0.75rem;
+      text-align: center;
+    }
+    main {
+      flex-direction: column;
+    }
+    #sidepanel {
+      width: 100%;
+      max-height: 40vh;
+      border-left: none;
+      border-top: 1px solid var(--border);
+      padding: 12px 16px;
+      order: 2;
+    }
+    #map {
+      order: 1;
+      min-height: 50vh;
+    }
+    #legend {
+      bottom: 12px;
+      left: 12px;
+      font-size: 0.7rem;
+    }
+    #sidepanel h2 {
+      font-size: 1.15rem;
+    }
+    .metric-row {
+      font-size: 0.9rem;
+      padding: 6px 0;
+    }
+  }
+  #no-selection {
+    color: var(--muted);
+    text-align: center;
+    margin-top: 40px;
+    line-height: 1.5;
+  }
+</style>
+<body>
+<div id="app">
+  <header>
+    <h1>World Metrics Map</h1>
+    <div class="metrics" id="metricSwitcher">
+      <button data-metric="population" class="active">Population</button>
+      <button data-metric="gdp">GDP / capita</button>
+      <button data-metric="life">Life Expectancy</button>
+      <button data-metric="happiness">Happiness</button>
+    </div>
+  </header>
+  <main>
+    <div id="map"></div>
+    <aside id="sidepanel">
+      <div id="no-selection">
+        Tap a country to see details.<br>Hover or long-press for quick info.
+      </div>
+      <div id="country-details" style="display:none;">
+        <h2 id="detail-name">—</h2>
+        <div class="iso" id="detail-iso"></div>
+        <div id="metrics-list"></div>
+      </div>
+    </aside>
+  </main>
+  <div id="legend"></div>
+  <div class="loading" id="loading">Loading world data…</div>
+</div>
+
+<script>
+const METRICS = {
+  population: { label: "Population (millions)", unit: "M", domain: [0, 1450], format: v => v.toFixed(1) },
+  gdp: { label: "GDP per capita (USD)", unit: "", domain: [500, 90000], format: v => "$" + Math.round(v).toLocaleString() },
+  life: { label: "Life Expectancy (years)", unit: "yrs", domain: [50, 86], format: v => v.toFixed(1) },
+  happiness: { label: "Happiness Score", unit: "/10", domain: [3, 8], format: v => v.toFixed(1) }
+};
+
+// Sample data keyed by exact world-atlas names (subset; others will be gray)
+const DATA = {
+  "United States of America": { population: 331.9, gdp: 76330, life: 77.2, happiness: 6.94 },
+  "China": { population: 1412.2, gdp: 12556, life: 78.2, happiness: 5.82 },
+  "India": { population: 1408.0, gdp: 2485, life: 70.8, happiness: 4.04 },
+  "Indonesia": { population: 277.5, gdp: 4788, life: 71.7, happiness: 5.28 },
+  "Brazil": { population: 215.3, gdp: 8918, life: 75.9, happiness: 6.37 },
+  "Russia": { population: 144.4, gdp: 12195, life: 72.6, happiness: 5.66 },
+  "Japan": { population: 125.7, gdp: 33815, life: 84.6, happiness: 6.13 },
+  "Germany": { population: 83.2, gdp: 51203, life: 81.3, happiness: 6.99 },
+  "United Kingdom": { population: 67.3, gdp: 45850, life: 81.2, happiness: 6.80 },
+  "France": { population: 67.8, gdp: 43658, life: 82.7, happiness: 6.66 },
+  "Italy": { population: 59.0, gdp: 35657, life: 83.2, happiness: 6.40 },
+  "Canada": { population: 38.9, gdp: 52051, life: 82.4, happiness: 6.96 },
+  "Australia": { population: 26.0, gdp: 64491, life: 83.2, happiness: 7.09 },
+  "Mexico": { population: 128.9, gdp: 10046, life: 75.1, happiness: 6.32 },
+  "South Korea": { population: 51.7, gdp: 34998, life: 83.5, happiness: 5.94 },
+  "Spain": { population: 47.4, gdp: 30103, life: 83.5, happiness: 6.48 },
+  "Netherlands": { population: 17.5, gdp: 57025, life: 81.9, happiness: 7.40 },
+  "Saudi Arabia": { population: 36.4, gdp: 23566, life: 75.1, happiness: 6.46 },
+  "Turkey": { population: 85.3, gdp: 10674, life: 77.7, happiness: 4.74 },
+  "Switzerland": { population: 8.7, gdp: 91992, life: 83.8, happiness: 7.51 },
+  "Sweden": { population: 10.4, gdp: 61029, life: 83.0, happiness: 7.40 },
+  "Norway": { population: 5.4, gdp: 89090, life: 83.2, happiness: 7.39 },
+  "Denmark": { population: 5.9, gdp: 68008, life: 81.4, happiness: 7.59 },
+  "Finland": { population: 5.5, gdp: 53655, life: 81.9, happiness: 7.80 },
+  "New Zealand": { population: 5.1, gdp: 48781, life: 82.3, happiness: 7.12 },
+  "Singapore": { population: 5.9, gdp: 72794, life: 83.9, happiness: 6.48 },
+  "United Arab Emirates": { population: 9.4, gdp: 44316, life: 78.0, happiness: 6.73 },
+  "South Africa": { population: 60.0, gdp: 6994, life: 64.1, happiness: 4.96 },
+  "Nigeria": { population: 218.5, gdp: 2184, life: 54.7, happiness: 4.88 },
+  "Egypt": { population: 111.0, gdp: 4295, life: 71.9, happiness: 4.28 },
+  "Argentina": { population: 45.8, gdp: 10636, life: 76.7, happiness: 5.97 },
+  "Chile": { population: 19.6, gdp: 15941, life: 80.2, happiness: 6.33 },
+  "Colombia": { population: 52.0, gdp: 6104, life: 77.3, happiness: 5.63 },
+  "Thailand": { population: 71.7, gdp: 7066, life: 77.2, happiness: 5.99 },
+  "Vietnam": { population: 98.2, gdp: 4164, life: 75.4, happiness: 5.76 },
+  "Philippines": { population: 115.6, gdp: 3499, life: 71.2, happiness: 5.90 },
+  "Malaysia": { population: 33.9, gdp: 11372, life: 76.2, happiness: 5.71 },
+  "Poland": { population: 37.8, gdp: 17841, life: 78.7, happiness: 6.17 },
+  "Ukraine": { population: 43.8, gdp: 4534, life: 72.0, happiness: 4.88 },
+  "Pakistan": { population: 240.5, gdp: 1505, life: 67.3, happiness: 4.52 },
+  "Bangladesh": { population: 172.0, gdp: 2688, life: 72.8, happiness: 4.28 },
+  "Iran": { population: 88.6, gdp: 4091, life: 76.7, happiness: 4.89 },
+  "Iraq": { population: 44.5, gdp: 4775, life: 70.6, happiness: 4.44 },
+  "Kenya": { population: 55.0, gdp: 2099, life: 66.7, happiness: 4.54 },
+  "Ethiopia": { population: 126.5, gdp: 1028, life: 67.0, happiness: 4.19 },
+  "Morocco": { population: 37.5, gdp: 3795, life: 76.7, happiness: 4.90 },
+  "Algeria": { population: 45.6, gdp: 3765, life: 77.0, happiness: 5.12 },
+  "Portugal": { population: 10.3, gdp: 24567, life: 81.9, happiness: 5.97 },
+  "Greece": { population: 10.4, gdp: 20876, life: 82.2, happiness: 5.95 },
+  "Belgium": { population: 11.6, gdp: 51247, life: 81.6, happiness: 6.86 },
+  "Austria": { population: 9.0, gdp: 52131, life: 81.5, happiness: 7.10 },
+  "Israel": { population: 9.4, gdp: 52170, life: 82.8, happiness: 7.47 },
+  "Ireland": { population: 5.1, gdp: 99013, life: 82.3, happiness: 6.90 },
+  "Czechia": { population: 10.5, gdp: 26821, life: 79.4, happiness: 6.85 },
+  "Romania": { population: 19.1, gdp: 14858, life: 75.5, happiness: 6.48 },
+  "Hungary": { population: 9.6, gdp: 18772, life: 76.9, happiness: 6.04 },
+  "Kazakhstan": { population: 19.6, gdp: 10306, life: 73.2, happiness: 6.23 },
+  "Uzbekistan": { population: 35.6, gdp: 1983, life: 71.7, happiness: 6.20 }
+};
+
+let currentMetric = "population";
+let geoLayer;
+let selectedLayer = null;
+let map;
+
+function getValue(feature) {
+  const name = feature.properties.name;
+  const d = DATA[name];
+  return d ? d[currentMetric] : null;
+}
+
+function colorScale(value) {
+  if (value == null) return "#e2e8f0";
+  const m = METRICS[currentMetric];
+  const [min, max] = m.domain;
+  const t = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  // Simple sequential blue → cyan → amber
+  const r = Math.round(30 + t * 180);
+  const g = Math.round(100 + t * 100);
+  const b = Math.round(200 - t * 100);
+  return `rgb(${r},${g},${b})`;
+}
+
+function style(feature) {
+  const value = getValue(feature);
+  return {
+    fillColor: colorScale(value),
+    weight: 0.6,
+    opacity: 1,
+    color: "#cbd5e1",
+    fillOpacity: value != null ? 0.82 : 0.45
+  };
+}
+
+function highlight(e) {
+  const layer = e.target;
+  if (layer !== selectedLayer) {
+    layer.setStyle({ weight: 1.8, color: "#94a3b8", fillOpacity: 0.95 });
+  }
+  if (!L.Browser.ie && !L.Browser.opera && !L.Browser.edge) {
+    layer.bringToFront();
+  }
+}
+
+function resetHighlight(e) {
+  if (e.target !== selectedLayer) {
+    geoLayer.resetStyle(e.target);
+  }
+}
+
+function onClick(e) {
+  const layer = e.target;
+  const feature = layer.feature;
+  const name = feature.properties.name;
+  const data = DATA[name] || null;
+
+  if (selectedLayer) {
+    geoLayer.resetStyle(selectedLayer);
+    selectedLayer = null;
+  }
+  selectedLayer = layer;
+  layer.setStyle({ weight: 2.5, color: "#fbbf24", fillOpacity: 0.95 });
+  layer.bringToFront();
+
+  showDetails(name, feature.id, data);
+}
+
+function onEachFeature(feature, layer) {
+  const value = getValue(feature);
+  const m = METRICS[currentMetric];
+  const tip = value != null
+    ? `<strong>${feature.properties.name}</strong><br>${m.label}: ${m.format(value)}`
+    : `<strong>${feature.properties.name}</strong><br>No data`;
+  layer.bindTooltip(tip, { sticky: true, direction: "top", offset: [0, -8] });
+
+  layer.on({
+    mouseover: highlight,
+    mouseout: resetHighlight,
+    click: onClick
+  });
+}
+
+function updateTooltips() {
+  if (!geoLayer) return;
+  geoLayer.eachLayer(layer => {
+    const feature = layer.feature;
+    const value = getValue(feature);
+    const m = METRICS[currentMetric];
+    const tip = value != null
+      ? `<strong>${feature.properties.name}</strong><br>${m.label}: ${m.format(value)}`
+      : `<strong>${feature.properties.name}</strong><br>No data`;
+    layer.setTooltipContent(tip);
+  });
+}
+
+function updateLegend() {
+  const m = METRICS[currentMetric];
+  const [min, max] = m.domain;
+  const steps = 5;
+  let html = `<h3>${m.label}</h3>`;
+  html += `<div class="legend-bar" style="background: linear-gradient(to right, ${colorScale(min)}, ${colorScale((min+max)/2)}, ${colorScale(max)});"></div>`;
+  html += `<div class="legend-labels"><span>${m.format(min)}</span><span>${m.format(max)}</span></div>`;
+  document.getElementById("legend").innerHTML = html;
+}
+
+function showDetails(name, iso, data) {
+  document.getElementById("no-selection").style.display = "none";
+  const det = document.getElementById("country-details");
+  det.style.display = "block";
+  document.getElementById("detail-name").textContent = name;
+  document.getElementById("detail-iso").textContent = "ISO numeric: " + (iso || "—");
+
+  const list = document.getElementById("metrics-list");
+  list.innerHTML = "";
+  for (const key of Object.keys(METRICS)) {
+    const meta = METRICS[key];
+    const val = data ? data[key] : null;
+    const row = document.createElement("div");
+    row.className = "metric-row" + (key === currentMetric ? " current" : "");
+    row.innerHTML = `<span class="label">${meta.label}</span><span class="value">${val != null ? meta.format(val) : "—"}</span>`;
+    list.appendChild(row);
+  }
+}
+
+function setMetric(metric) {
+  currentMetric = metric;
+  document.querySelectorAll(".metrics button").forEach(btn => {
+    btn.classList.toggle("active", btn.dataset.metric === metric);
+  });
+  if (geoLayer) {
+    geoLayer.setStyle(style);
+    if (selectedLayer) {
+      selectedLayer.setStyle({ weight: 2.5, color: "#fbbf24", fillOpacity: 0.95 });
+      selectedLayer.bringToFront();
+    }
+    updateTooltips();
+  }
+  updateLegend();
+  if (selectedLayer) {
+    const f = selectedLayer.feature;
+    showDetails(f.properties.name, f.id, DATA[f.properties.name] || null);
+  }
+}
+
+// Init
+map = L.map("map", {
+  zoomControl: true,
+  attributionControl: true,
+  tap: true,
+  touchZoom: true,
+  dragging: true,
+  doubleClickZoom: true,
+  scrollWheelZoom: true
+}).setView([20, 10], 2);
+L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  subdomains: "abcd",
+  maxZoom: 19
+}).addTo(map);
+
+document.getElementById("metricSwitcher").addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (btn) setMetric(btn.dataset.metric);
+});
+
+fetch("https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json")
+  .then(r => r.json())
+  .then(topo => {
+    const geojson = topojson.feature(topo, topo.objects.countries);
+    geoLayer = L.geoJSON(geojson, {
+      style,
+      onEachFeature
+    }).addTo(map);
+    updateLegend();
+    document.getElementById("loading").style.display = "none";
+    setTimeout(() => map.invalidateSize(), 100);
+  })
+  .catch(err => {
+    document.getElementById("loading").textContent = "Failed to load map data.";
+    console.error(err);
+  });
+
+// Initial legend
+updateLegend();
+
+// Handle orientation / resize on mobile
+window.addEventListener("resize", () => {
+  if (map) setTimeout(() => map.invalidateSize(), 150);
+});
+window.addEventListener("orientationchange", () => {
+  if (map) setTimeout(() => map.invalidateSize(), 300);
+});
+</script>
+</body>
+</html>
